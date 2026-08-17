@@ -19,9 +19,9 @@ Nobody at the scanning station needs to know the individual script names.
    shortcut named **Product Label Print** for the launcher.
 2. **launcher.py** — the main window: logo, title, and the three buttons
    described above.
-3. **setup_config.py** — settings: printer name, label size, PDF cache
-   subfolder name, barcode output folder, and where Affinity Designer /
-   Acrobat are installed. Saves to `config.json`.
+3. **setup_config.py** — settings: printer name, label size, barcode
+   output folder, and where Affinity Designer / Acrobat are installed.
+   Saves to `config.json`.
 4. **generate_barcode.py** — pick an `.afdesign` file and a default
    quantity, get back a barcode image (Code128) encoding both as
    `filepath|quantity`. Print that onto your product label/card.
@@ -98,10 +98,10 @@ For a source file at:
 C:\Products\Labels\WidgetA.afdesign
 ```
 
-the cached export lives at:
+the cached export lives right alongside it, same folder, same base name:
 
 ```
-C:\Products\Labels\PDFs\WidgetA.pdf
+C:\Products\Labels\WidgetA.pdf
 ```
 
 If that PDF is newer than the source file, it's reused as-is. If the

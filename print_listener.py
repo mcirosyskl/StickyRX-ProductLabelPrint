@@ -7,11 +7,11 @@ Flow (updated):
     1. Scan a product barcode. It encodes "file_path|default_quantity"
        (see generate_barcode.py). If it's an older barcode without a
        quantity baked in, the quantity defaults to 1.
-    2. The script checks the "PDFs" subfolder (next to the source file)
-       for a cached PDF export. If it exists AND is newer than the
-       source file, it's reused. Otherwise the source file is opened in
-       Affinity Designer and exported fresh (see export_pdf_via_affinity
-       below).
+    2. The script checks for a cached PDF export sitting in the same
+       folder as the source file (same base name, .pdf extension). If
+       it exists AND is newer than the source file, it's reused.
+       Otherwise the source file is opened in Affinity Designer and
+       exported fresh (see export_pdf_via_affinity below).
     3. The default quantity from the barcode appears in an editable box
        on screen, already selected. Just press Enter / click Print to
        use it as-is, or type a different number first if this run needs
@@ -98,10 +98,14 @@ def is_affinity_running(affinity_exe: str) -> bool:
 
 
 def get_pdf_path_for_source(source_path: str, config: dict) -> str:
+    """
+    Returns the path the cached PDF export should live at: the same
+    folder as the source .afdesign file, with the same base name and a
+    .pdf extension.
+    """
     source_dir = os.path.dirname(source_path)
-    pdf_dir = os.path.join(source_dir, config["pdf_subfolder_name"])
     base_name = os.path.splitext(os.path.basename(source_path))[0]
-    return os.path.join(pdf_dir, base_name + ".pdf")
+    return os.path.join(source_dir, base_name + ".pdf")
 
 
 def pdf_cache_is_current(source_path: str, pdf_path: str) -> bool:

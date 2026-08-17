@@ -4,7 +4,6 @@ setup_config.py
 A small GUI for configuring the label print system:
   - Printer name (as it appears in Windows > Devices and Printers)
   - Label width / height (inches)
-  - Name of the PDF cache subfolder (created next to each source file)
   - Where generated barcode images are saved
   - Paths to Affinity Designer and Adobe Acrobat executables
 
@@ -26,11 +25,14 @@ CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 # at runtime to a folder under the current user's Documents folder. That
 # location is always writable without admin rights, unlike the install
 # folder under C:\Program Files, which is locked down for regular users.
+#
+# PDFs are exported into the same folder as each source .afdesign file
+# (see get_pdf_path_for_source in print_listener.py) rather than a
+# separate subfolder, so there's no PDF-location setting here.
 DEFAULT_CONFIG = {
     "printer_name": "Afinia",
     "label_width_in": 4.0,
     "label_height_in": 6.0,
-    "pdf_subfolder_name": "PDFs",
     "barcode_output_dir": "",
     "affinity_exe_path": r"C:\Program Files\Affinity\Designer 2\Designer.exe",
     "acrobat_exe_path": r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe",
@@ -97,11 +99,6 @@ class SetupWindow(tk.Tk):
         tk.Label(self, text="Label height (in)", anchor="w").grid(row=row, column=0, sticky="w", **pad)
         self.height_var = tk.StringVar(value=str(self.config_data["label_height_in"]))
         tk.Entry(self, textvariable=self.height_var, width=10).grid(row=row, column=1, sticky="w", **pad)
-
-        row += 1
-        tk.Label(self, text="PDF cache subfolder name", anchor="w").grid(row=row, column=0, sticky="w", **pad)
-        self.pdf_folder_var = tk.StringVar(value=self.config_data["pdf_subfolder_name"])
-        tk.Entry(self, textvariable=self.pdf_folder_var, width=20).grid(row=row, column=1, sticky="w", **pad)
 
         row += 1
         tk.Label(self, text="Barcode output folder", anchor="w").grid(row=row, column=0, sticky="w", **pad)
@@ -182,7 +179,6 @@ class SetupWindow(tk.Tk):
             "printer_name": self.printer_var.get().strip(),
             "label_width_in": width,
             "label_height_in": height,
-            "pdf_subfolder_name": self.pdf_folder_var.get().strip() or "PDFs",
             "barcode_output_dir": barcode_dir,
             "affinity_exe_path": self.affinity_var.get().strip(),
             "acrobat_exe_path": self.acrobat_var.get().strip(),
