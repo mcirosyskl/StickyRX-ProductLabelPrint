@@ -25,7 +25,7 @@ A barcode scanner behaves like a keyboard that types fast and hits Enter,
 so the always-focused text box below is all that's needed to "listen"
 for scans.
 
-IMPORTANT - the one piece that needs hands-on testing:
+IMPORTANT - the pieces that need hands-on testing:
     Affinity Designer does not have a documented command-line export
     option, so export_pdf_via_affinity() below drives it by opening the
     file and sending a keyboard shortcut for File > Export. The exact
@@ -37,6 +37,16 @@ IMPORTANT - the one piece that needs hands-on testing:
     exported successfully one time, the cache logic means Affinity won't
     need to be touched again for that product until you edit the source
     file.
+
+    If Affinity is already open, export_pdf_via_affinity() reuses that
+    instance via a File > Open keystroke (OPEN_FILE_KEYSTROKES) instead
+    of launching a second one - this avoids paying the cold-start wait
+    on every scan, only the first one. This also needs verification on
+    your installed version, and matters most if multiple documents can
+    end up open in tabs at once: the export keystrokes that follow act
+    on whichever document currently has focus, so confirm the newly
+    opened file is the active tab/window before export happens
+    unattended for the first time.
 
 Requires:
     pip install pywin32 pywinauto
@@ -60,6 +70,32 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # installed version before relying on it - see module docstring above.
 EXPORT_KEYSTROKES = ["^+e"]  # Ctrl+Shift+E - adjust if your version differs
 
+# Keystrokes sent to an already-open Affinity instance to reach File > Open
+# so a new source file can be loaded into it, instead of launching a whole
+# second instance of the app. VERIFY THIS on your installed version too.
+OPEN_FILE_KEYSTROKES = ["^o"]  # Ctrl+O - adjust if your version differs
+
+
+def is_affinity_running(affinity_exe: str) -> bool:
+    """
+    Checks (via the Windows `tasklist` command) whether an Affinity
+    Designer process is already running, so export_pdf_via_affinity can
+    reuse it instead of paying the cold-start cost of launching a new
+    instance every single scan.
+    """
+    exe_name = os.path.basename(affinity_exe)
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {exe_name}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return exe_name.lower() in result.stdout.lower()
+    except Exception:
+        # If the check itself fails for any reason, fall back to treating
+        # Affinity as "not running" - export_pdf_via_affinity will just
+        # launch a fresh instance, which is the safe default behavior.
+        return False
+
 
 def get_pdf_path_for_source(source_path: str, config: dict) -> str:
     source_dir = os.path.dirname(source_path)
@@ -76,21 +112,44 @@ def pdf_cache_is_current(source_path: str, pdf_path: str) -> bool:
 
 def export_pdf_via_affinity(source_path: str, pdf_path: str, config: dict) -> None:
     """
-    Opens the source file in Affinity Designer and exports a PDF to
-    pdf_path. See the module docstring - this step needs to be verified
-    against your installed Affinity version.
+    Gets the source file open in Affinity Designer and exports a PDF to
+    pdf_path, then drives the export dialog. See the module docstring -
+    both this step and the reuse-existing-instance step below need to be
+    verified against your installed Affinity version.
+
+    If Affinity is already running (e.g. left open from a previous scan
+    or opened manually), this reuses that instance via File > Open
+    instead of launching a second one - a full cold start only happens
+    the first time Affinity needs to be opened.
     """
     import pywinauto
 
     os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
 
     affinity_exe = config["affinity_exe_path"]
-    subprocess.Popen([affinity_exe, source_path])
 
-    # Give Affinity time to launch and load the file. Large files may
-    # need a longer wait - adjust export_wait_seconds in Setup Config if
-    # exports come out blank or the dialog isn't ready yet.
-    time.sleep(config.get("export_wait_seconds", 6))
+    if is_affinity_running(affinity_exe):
+        # Reuse the existing window - open the target file into it via
+        # File > Open rather than starting a whole second process.
+        app = pywinauto.Application(backend="uia").connect(path=affinity_exe)
+        window = app.top_window()
+        window.set_focus()
+
+        for keys in OPEN_FILE_KEYSTROKES:
+            window.type_keys(keys, pause=0.2)
+            time.sleep(1.0)
+
+        window.type_keys(source_path, with_spaces=True, pause=0.02)
+        window.type_keys("{ENTER}", pause=0.2)
+
+        # Loading a file into an already-running instance is usually
+        # faster than a full cold start, but give it a beat - reuses the
+        # same export_wait_seconds setting from Setup Config.
+        time.sleep(config.get("export_wait_seconds", 6))
+    else:
+        # No running instance found - launch fresh, same as before.
+        subprocess.Popen([affinity_exe, source_path])
+        time.sleep(config.get("export_wait_seconds", 6))
 
     app = pywinauto.Application(backend="uia").connect(path=affinity_exe)
     window = app.top_window()
