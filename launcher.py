@@ -10,9 +10,10 @@ tools:
     Generate Barcode     -> generate_barcode.py (occasional)
 
 Scan / Print Label is the big, prominent button since it's what gets
-used constantly at the scanning station. Setup Config and Generate
-Barcode are small, muted links near the top - still one click away, but
-visually out of the way so they don't compete with the main action.
+used constantly at the scanning station, shown right below the logo and
+title. Setup Config and Generate Barcode are small, muted, centered
+links below that - still one click away, but visually out of the way
+so they don't compete with the main action.
 
 This is the app the Desktop shortcut points to - nobody at the scanning
 station needs to know the individual script names.
@@ -67,18 +68,6 @@ class LauncherWindow(tk.Tk):
         outer = tk.Frame(self, bg=BG_COLOR)
         outer.pack(padx=28, pady=22)
 
-        # --- Small, muted secondary actions along the top ---------------
-        secondary_row = tk.Frame(outer, bg=BG_COLOR)
-        secondary_row.pack(fill="x", pady=(0, 18))
-
-        self._make_secondary_button(
-            secondary_row, "Setup Config", lambda: launch_script("setup_config.py")
-        ).pack(side="left")
-
-        self._make_secondary_button(
-            secondary_row, "Generate Barcode", lambda: launch_script("generate_barcode.py")
-        ).pack(side="left", padx=(14, 0))
-
         # --- Logo + title, balanced, not overpowering --------------------
         header = tk.Frame(outer, bg=BG_COLOR)
         header.pack(pady=(0, 22))
@@ -86,7 +75,7 @@ class LauncherWindow(tk.Tk):
         if os.path.exists(LOGO_PATH):
             try:
                 img = Image.open(LOGO_PATH)
-                img.thumbnail((110, 110))
+                img.thumbnail((130, 130))  # ~18% larger than the previous 110x110 cap
                 self._logo_img = ImageTk.PhotoImage(img)
                 tk.Label(header, image=self._logo_img, bg=BG_COLOR).pack()
             except Exception:
@@ -117,6 +106,18 @@ class LauncherWindow(tk.Tk):
             command=lambda: launch_script("print_listener.py"),
         )
         main_button.pack(fill="x")
+
+        # --- Small, muted secondary actions, centered below the main button
+        secondary_row = tk.Frame(outer, bg=BG_COLOR)
+        secondary_row.pack(pady=(18, 0))
+
+        self._make_secondary_button(
+            secondary_row, "Setup Config", lambda: launch_script("setup_config.py")
+        ).pack(side="left")
+
+        self._make_secondary_button(
+            secondary_row, "Generate Barcode", lambda: launch_script("generate_barcode.py")
+        ).pack(side="left", padx=(14, 0))
 
     def _make_secondary_button(self, parent, text, command):
         """
