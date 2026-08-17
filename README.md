@@ -1,4 +1,4 @@
-# Kanban Label Print System
+# Product Label Print System
 
 **launcher.py** is the app everyone actually opens — it shows the StickyRx
 logo and title, with three buttons: SETUP CONFIG, GENERATE BARCODE, and
