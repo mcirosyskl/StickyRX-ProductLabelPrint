@@ -1,0 +1,11 @@
+{
+    "printer_name": "YOUR_PRINTER_NAME_HERE",
+    "label_width_in": 4.0,
+    "label_height_in": 6.0,
+    "pdf_subfolder_name": "PDFs",
+    "barcode_output_dir": "",
+    "affinity_exe_path": "C:\\Program Files\\Affinity\\Designer 2\\Designer.exe",
+    "acrobat_exe_path": "C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe",
+    "export_wait_seconds": 6,
+    "quantity_prompt_timeout_seconds": 30
+}
