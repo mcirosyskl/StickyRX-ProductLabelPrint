@@ -2,18 +2,20 @@
 launcher.py
 -----------
 The main entry point for the Product Label Print system. Shows the
-StickyRx logo, a title, and three buttons that launch the individual
-tools:
+StickyRx logo, a title, and the one button used constantly at the
+scanning station:
 
     Scan / Print Label   -> print_listener.py   (the main, day-to-day action)
-    Setup Config         -> setup_config.py     (occasional)
-    Generate Barcode     -> generate_barcode.py (occasional)
 
-Scan / Print Label is the big, prominent button since it's what gets
-used constantly at the scanning station, shown right below the logo and
-title. Setup Config and Generate Barcode are small, muted, centered
-links below that - still one click away, but visually out of the way
-so they don't compete with the main action.
+The occasional/admin tools live behind a small cog-wheel icon in the
+top-right corner instead of their own buttons, so they stay out of the
+way but are still one click away:
+
+    Setup Config         -> setup_config.py
+    Generate Barcode     -> generate_barcode.py
+
+Clicking the cog pops up a small menu with those two options right
+under the icon.
 
 This is the app the Desktop shortcut points to - nobody at the scanning
 station needs to know the individual script names.
@@ -35,6 +37,8 @@ BRAND_BLACK = "#111111"
 BG_COLOR = "#ffffff"
 MUTED_TEXT = "#8a8a8a"
 MUTED_BORDER = "#d9d9d9"
+COG_COLOR = "#8a8a8a"
+COG_HOVER_COLOR = "#111111"
 
 
 def get_pythonw_executable() -> str:
@@ -67,6 +71,28 @@ class LauncherWindow(tk.Tk):
 
         outer = tk.Frame(self, bg=BG_COLOR)
         outer.pack(padx=28, pady=22)
+
+        # --- Cog-wheel icon, top-right corner, opens the admin menu -------
+        self._settings_menu = tk.Menu(self, tearoff=0)
+        self._settings_menu.add_command(
+            label="Setup Config", command=lambda: launch_script("setup_config.py")
+        )
+        self._settings_menu.add_command(
+            label="Generate Barcode", command=lambda: launch_script("generate_barcode.py")
+        )
+
+        cog_label = tk.Label(
+            self,
+            text="\u2699",  # gear/cog glyph
+            font=("Segoe UI", 15),
+            fg=COG_COLOR,
+            bg=BG_COLOR,
+            cursor="hand2",
+        )
+        cog_label.place(relx=1.0, x=-14, y=10, anchor="ne")
+        cog_label.bind("<Button-1>", self._show_settings_menu)
+        cog_label.bind("<Enter>", lambda e: cog_label.configure(fg=COG_HOVER_COLOR))
+        cog_label.bind("<Leave>", lambda e: cog_label.configure(fg=COG_COLOR))
 
         # --- Logo + title, balanced, not overpowering --------------------
         header = tk.Frame(outer, bg=BG_COLOR)
@@ -107,40 +133,10 @@ class LauncherWindow(tk.Tk):
         )
         main_button.pack(fill="x")
 
-        # --- Small, muted secondary actions, centered below the main button
-        secondary_row = tk.Frame(outer, bg=BG_COLOR)
-        secondary_row.pack(pady=(18, 0))
+    def _show_settings_menu(self, event):
+        """Pop the Setup Config / Generate Barcode menu up under the cog."""
+        self._settings_menu.tk_popup(event.widget.winfo_rootx(), event.widget.winfo_rooty() + event.widget.winfo_height())
 
-        self._make_secondary_button(
-            secondary_row, "Setup Config", lambda: launch_script("setup_config.py")
-        ).pack(side="left")
-
-        self._make_secondary_button(
-            secondary_row, "Generate Barcode", lambda: launch_script("generate_barcode.py")
-        ).pack(side="left", padx=(14, 0))
-
-    def _make_secondary_button(self, parent, text, command):
-        """
-        A deliberately low-key button: small text, thin border, no fill
-        color, so it reads as a minor/administrative action rather than
-        competing with the main Scan / Print Label button.
-        """
-        return tk.Button(
-            parent,
-            text=text,
-            font=("Segoe UI", 9),
-            fg=MUTED_TEXT,
-            bg=BG_COLOR,
-            activebackground="#f2f2f2",
-            activeforeground=BRAND_BLACK,
-            relief="solid",
-            bd=1,
-            highlightbackground=MUTED_BORDER,
-            padx=10,
-            pady=4,
-            cursor="hand2",
-            command=command,
-        )
 
 
 if __name__ == "__main__":

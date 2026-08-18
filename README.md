@@ -1,13 +1,15 @@
 # Product Label Print
 
 **launcher.py** is the app everyone actually opens — it shows the StickyRx
-logo and the "PRODUCT LABEL PRINT" title, with three buttons:
+logo and the "PRODUCT LABEL PRINT" title, with one main button and a
+small settings menu:
 
 - **SCAN / PRINT LABEL** — the large, prominent button. This is the
   day-to-day action used constantly at the scanning station.
-- **Setup Config** and **Generate Barcode** — small, low-key buttons near
-  the top. These are occasional/admin actions, so they're deliberately
-  out of the way and don't compete with Scan / Print Label.
+- **Cog-wheel icon** (top-right corner) — click it for a small popup menu
+  with **Setup Config** and **Generate Barcode**, the occasional/admin
+  actions. They're tucked out of the way so they don't compete with
+  Scan / Print Label.
 
 Nobody at the scanning station needs to know the individual script names.
 
@@ -49,11 +51,12 @@ Nobody at the scanning station needs to know the individual script names.
      `python-barcode`, `pillow`).
    - Add a single Desktop shortcut: **Product Label Print**.
 3. Double-click **Product Label Print** on the Desktop.
-4. Click **Setup Config** and confirm the printer name (must match
-   exactly what Windows calls it — check Settings > Printers &
-   Scanners), label size (4x6 is the default), and the install paths
-   for Affinity Designer and Acrobat.
-5. Use **Generate Barcode** to make a barcode for each product.
+4. Click the **cog icon** (top-right corner) and choose **Setup Config**.
+   Confirm the printer name (must match exactly what Windows calls it —
+   check Settings > Printers & Scanners), label size (4x6 is the
+   default), and the install paths for Affinity Designer and Acrobat.
+5. Click the cog icon again and choose **Generate Barcode** to make a
+   barcode for each product.
 6. Use **Scan / Print Label** at the scanning station — leave that
    window open and focused.
 
