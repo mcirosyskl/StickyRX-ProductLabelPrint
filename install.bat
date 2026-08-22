@@ -1,7 +1,7 @@
 @echo off
 REM install.bat
 REM -----------
-REM Double-click this file to install the Kanban Label Print System.
+REM Double-click this file to install ProductLabelPrint.
 REM It automatically:
 REM   1. Asks Windows for Administrator permission (a UAC prompt will
 REM      pop up - click "Yes").
@@ -10,7 +10,7 @@ REM      never see the "running scripts is disabled on this system"
 REM      error.
 REM
 REM Keep this file in the same folder as install.ps1 and the other
-REM Kanban Label Print System files.
+REM ProductLabelPrint files.
 
 REM Check whether this window is already running as Administrator.
 net session >nul 2>&1

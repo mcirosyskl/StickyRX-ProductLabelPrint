@@ -1,9 +1,8 @@
 """
 launcher.py
 -----------
-The main entry point for the Product Label Print system. Shows the
-StickyRx logo, a title, and the one button used constantly at the
-scanning station:
+The main entry point for ProductLabelPrint. Shows the StickyRx logo, a
+title, and the one button used constantly at the scanning station:
 
     Scan / Print Label   -> print_listener.py   (the main, day-to-day action)
 
@@ -19,6 +18,21 @@ under the icon.
 
 This is the app the Desktop shortcut points to - nobody at the scanning
 station needs to know the individual script names.
+
+NOTE ON THE DOUBLE-WINDOW ISSUE:
+If this file is opened in a way that uses python.exe instead of
+pythonw.exe - for example by double-clicking launcher.py directly, or
+via a Windows "Create shortcut" shortcut that points at the .py file
+itself rather than at pythonw.exe - Windows attaches a visible console
+window to the process, and the Tk window runs inside that same process.
+Closing the console then kills the whole process, taking the app window
+down with it. _relaunch_without_console_if_needed() below detects that
+case and automatically restarts itself under pythonw.exe (no console),
+then exits the console-attached copy - so this happens correctly no
+matter how the app was opened. The "Product Label Print"/"ProductLabelPrint"
+shortcut created by install.ps1 already points at pythonw.exe directly
+and isn't affected, but this makes the app robust even if someone
+creates their own shortcut to the .py file instead.
 """
 
 import os
@@ -39,6 +53,39 @@ MUTED_TEXT = "#8a8a8a"
 MUTED_BORDER = "#d9d9d9"
 COG_COLOR = "#8a8a8a"
 COG_HOVER_COLOR = "#111111"
+
+# Env var flag used to prevent an infinite relaunch loop - see
+# _relaunch_without_console_if_needed().
+_RELAUNCH_FLAG = "PLP_RELAUNCHED"
+
+
+def _relaunch_without_console_if_needed() -> None:
+    """
+    If this process is running under the console-attached python.exe
+    rather than the windowless pythonw.exe, restart under pythonw.exe
+    and exit this copy. This is what fixes the "extra shortcut window
+    stays open, and closing it closes the app too" problem, regardless
+    of how launcher.py was started.
+    """
+    if os.environ.get(_RELAUNCH_FLAG):
+        return  # already relaunched once - don't loop
+
+    exe_name = os.path.basename(sys.executable).lower()
+    if exe_name != "python.exe":
+        return  # already windowless (pythonw.exe), or an unusual interpreter - leave it alone
+
+    python_dir = os.path.dirname(sys.executable)
+    pythonw_path = os.path.join(python_dir, "pythonw.exe")
+    if not os.path.exists(pythonw_path):
+        return  # no pythonw.exe available to relaunch with - just continue as-is
+
+    env = os.environ.copy()
+    env[_RELAUNCH_FLAG] = "1"
+    try:
+        subprocess.Popen([pythonw_path, os.path.abspath(__file__)], cwd=SCRIPT_DIR, env=env)
+    except Exception:
+        return  # if relaunching fails for any reason, fall back to running as-is
+    sys.exit(0)
 
 
 def get_pythonw_executable() -> str:
@@ -65,7 +112,7 @@ def launch_script(script_name: str) -> None:
 class LauncherWindow(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Product Label Print")
+        self.title("ProductLabelPrint")
         self.configure(bg=BG_COLOR)
         self.resizable(False, False)
 
@@ -140,5 +187,6 @@ class LauncherWindow(tk.Tk):
 
 
 if __name__ == "__main__":
+    _relaunch_without_console_if_needed()
     app = LauncherWindow()
     app.mainloop()

@@ -213,7 +213,7 @@ class ListenerWindow(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Label Print Station")
+        self.title("ProductLabelPrint - Scan / Print")
         self.geometry("480x280")
         self.attributes("-topmost", True)
 

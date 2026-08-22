@@ -11,27 +11,38 @@ the operator can still change the quantity before printing if a
 particular run needs more or fewer than usual.
 
 Usage:
-    1. Run this script (or launch it from the launcher's "Generate
-       Barcode" button).
+    1. Run this script (or launch it from the launcher's cog menu ->
+       "Generate Barcode").
     2. Browse to (or paste) the full path of the .afdesign file.
     3. Enter the default quantity for this product (how many labels get
        printed most of the time you scan it).
     4. Click "Generate Barcode".
-    5. A PNG image is saved into the barcode output folder chosen in
-       Setup Config (Documents\\KanbanLabelPrinter\\Barcodes by default),
-       named after the source file. Print that PNG onto your label sheet
-       or product card.
+    5. A JPG image is saved into the barcode output folder chosen in
+       Setup Config (Documents\\ProductLabelPrint\\Barcodes by default).
+       The filename is the first 6 characters of the source file's name
+       plus "_plbc.jpg" - e.g. "WidgetA-Blue-4x6.afdesign" produces
+       "WidgetA_plbc.jpg". Print that JPG onto your label sheet or
+       product card.
+
+    NOTE: because only the first 6 characters of the source filename
+    are used, two products whose names share the same first 6
+    characters (e.g. "Widget-Red.afdesign" and "Widget-Blue.afdesign"
+    both start with "Widget") will produce the SAME output filename and
+    overwrite each other. Keep the first 6 characters of your source
+    filenames distinct per product to avoid this.
 
 Requires:
     pip install python-barcode pillow
 """
 
 import os
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import barcode
 from barcode.writer import ImageWriter
+from PIL import Image
 
 from setup_config import load_config, resolve_barcode_output_dir
 
@@ -43,6 +54,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BARCODE_FIELD_SEPARATOR = "|"
 
 DEFAULT_QUANTITY = 1
+
+# Suffix appended to the first 6 characters of the source filename to
+# form the saved barcode image's filename.
+OUTPUT_FILENAME_SUFFIX = "_plbc.jpg"
 
 
 def build_barcode_payload(file_path: str, quantity: int) -> str:
@@ -65,13 +80,33 @@ def parse_barcode_payload(payload: str):
     return payload, DEFAULT_QUANTITY
 
 
+def build_output_filename(source_file_path: str) -> str:
+    """
+    First 6 characters of the source file's name (no extension),
+    sanitized to safe filename characters, with "_plbc.jpg" appended.
+    E.g. "WidgetA-Blue-4x6.afdesign" -> "Widget_plbc.jpg".
+    """
+    base_name = os.path.splitext(os.path.basename(source_file_path))[0]
+    prefix = base_name[:6]
+    safe_prefix = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in prefix)
+    if not safe_prefix:
+        safe_prefix = "barcode"
+    return f"{safe_prefix}{OUTPUT_FILENAME_SUFFIX}"
+
+
 def generate_barcode_for_path(file_path: str, quantity: int) -> str:
     """
-    Generates a Code128 barcode image encoding "file_path|quantity".
-    Code128 is used because it supports the full range of characters
-    that can appear in a Windows file path (letters, numbers, spaces,
-    backslashes, colons, etc.) plus the "|" separator and digits.
-    Returns the path to the saved PNG.
+    Generates a Code128 barcode encoding "file_path|quantity" and saves
+    it as a JPG. Code128 is used because it supports the full range of
+    characters that can appear in a Windows file path (letters, numbers,
+    spaces, backslashes, colons, etc.) plus the "|" separator and digits.
+
+    python-barcode's ImageWriter renders natively to PNG, so the image
+    is rendered to a temporary PNG first, then converted to JPEG (which
+    needs an RGB image, not the black/white mode barcodes render in) and
+    saved at the final filename built by build_output_filename().
+
+    Returns the path to the saved JPG.
     """
     config_data = load_config()
     barcode_output_dir = resolve_barcode_output_dir(config_data)
@@ -87,26 +122,31 @@ def generate_barcode_for_path(file_path: str, quantity: int) -> str:
         ) from exc
 
     payload = build_barcode_payload(file_path, quantity)
-
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-    safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in base_name)
-    output_base = os.path.join(barcode_output_dir, safe_name)
+    output_filename = build_output_filename(file_path)
+    final_path = os.path.join(barcode_output_dir, output_filename)
 
     code128 = barcode.get("code128", payload, writer=ImageWriter())
-    saved_path = code128.save(output_base, options={
-        "module_height": 12.0,
-        "font_size": 8,
-        "text_distance": 3.0,
-        "quiet_zone": 4.0,
-        "write_text": False,  # the raw payload is long; skip printing it under the bars
-    })
-    return saved_path
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_base = os.path.join(tmp_dir, "tmp_barcode")
+        tmp_png_path = code128.save(tmp_base, options={
+            "module_height": 12.0,
+            "font_size": 8,
+            "text_distance": 3.0,
+            "quiet_zone": 4.0,
+            "write_text": False,  # the raw payload is long; skip printing it under the bars
+        })
+        with Image.open(tmp_png_path) as img:
+            rgb_img = img.convert("RGB")
+            rgb_img.save(final_path, "JPEG", quality=95)
+
+    return final_path
 
 
 class BarcodeGeneratorWindow(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Label Print System - Barcode Generator")
+        self.title("ProductLabelPrint - Barcode Generator")
         self.resizable(False, False)
 
         pad = {"padx": 10, "pady": 8}

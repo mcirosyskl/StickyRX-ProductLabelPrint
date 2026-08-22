@@ -1,7 +1,7 @@
 """
 setup_config.py
 ----------------
-A small GUI for configuring the label print system:
+A small GUI for configuring ProductLabelPrint:
   - Printer name (as it appears in Windows > Devices and Printers)
   - Label width / height (inches)
   - Where generated barcode images are saved
@@ -9,8 +9,17 @@ A small GUI for configuring the label print system:
 
 Run this once to set things up, and again any time you need to change
 the printer, label size, barcode output folder, or software paths.
-Settings are saved to config.json in the same folder as this script,
-and are read by print_listener.py and generate_barcode.py.
+
+Settings are saved to config.json in a per-user AppData folder rather
+than next to the scripts. The install folder (C:\\Program Files\\...)
+is locked down for standard user accounts, which is exactly what made
+the Save button silently do nothing before - the write would fail with
+a permission error that never got shown to you. AppData is always
+writable by the current user, no admin rights required.
+
+If an older config.json is found sitting next to these scripts (from a
+previous install), its values are copied over automatically the first
+time this runs, so nothing gets lost.
 """
 
 import json
@@ -19,7 +28,22 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
+
+# --- Where settings are actually stored -----------------------------
+# Per-user, always-writable location. No admin rights needed here,
+# unlike the old location next to the scripts inside Program Files.
+def _get_config_dir() -> str:
+    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+    return os.path.join(appdata, "ProductLabelPrint")
+
+
+CONFIG_DIR = _get_config_dir()
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+
+# Where older installs used to keep config.json. If this exists and
+# nothing has been saved to CONFIG_PATH yet, its values get migrated
+# over automatically (see _migrate_legacy_config_if_needed below).
+LEGACY_CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 
 # A blank barcode_output_dir means "use the default", which is resolved
 # at runtime to a folder under the current user's Documents folder. That
@@ -41,12 +65,39 @@ DEFAULT_CONFIG = {
 }
 
 
+def _migrate_legacy_config_if_needed() -> None:
+    """
+    One-time migration: if settings were never saved to the new AppData
+    location, but an old config.json exists next to the scripts (the
+    pre-fix location), copy its values over so existing settings
+    (printer name, label size, etc.) aren't lost.
+    """
+    if os.path.exists(CONFIG_PATH):
+        return
+    if not os.path.exists(LEGACY_CONFIG_PATH):
+        return
+    try:
+        with open(LEGACY_CONFIG_PATH, "r", encoding="utf-8") as f:
+            legacy_data = json.load(f)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f, indent=4)
+    except Exception:
+        # If migration fails for any reason, load_config() below just
+        # falls back to DEFAULT_CONFIG - not ideal, but never worse than
+        # before, and never blocks the app from opening.
+        pass
+
+
+_migrate_legacy_config_if_needed()
+
+
 def get_default_barcode_output_dir() -> str:
     """
     Per-user, always-writable fallback location for barcode images,
     used whenever barcode_output_dir is blank in config.json.
     """
-    return os.path.join(os.path.expanduser("~"), "Documents", "KanbanLabelPrinter", "Barcodes")
+    return os.path.join(os.path.expanduser("~"), "Documents", "ProductLabelPrint", "Barcodes")
 
 
 def load_config():
@@ -63,6 +114,7 @@ def load_config():
 
 
 def save_config(data):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
@@ -79,7 +131,7 @@ def resolve_barcode_output_dir(config_data) -> str:
 class SetupWindow(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Label Print System - Setup")
+        self.title("ProductLabelPrint - Setup")
         self.resizable(False, False)
         self.config_data = load_config()
 
@@ -185,8 +237,22 @@ class SetupWindow(tk.Tk):
             "export_wait_seconds": export_wait,
             "quantity_prompt_timeout_seconds": self.config_data.get("quantity_prompt_timeout_seconds", 30),
         }
-        save_config(new_config)
-        messagebox.showinfo("Saved", "Settings saved to config.json")
+
+        try:
+            save_config(new_config)
+        except Exception as exc:
+            # This is the fix for "Save does nothing": previously an
+            # error writing config.json (e.g. no permission to the old
+            # Program Files location) was silently swallowed. Now it's
+            # both surfaced to you AND far less likely to happen at all,
+            # since config.json now lives in a per-user AppData folder.
+            messagebox.showerror(
+                "Couldn't save settings",
+                f"Settings could not be saved to:\n{CONFIG_PATH}\n\n{exc}"
+            )
+            return
+
+        messagebox.showinfo("Saved", "Settings saved.")
         self.destroy()
 
 
