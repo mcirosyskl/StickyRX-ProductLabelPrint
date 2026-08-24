@@ -27,22 +27,29 @@ for scans.
 
 IMPORTANT - the pieces that need hands-on testing:
     Affinity Designer does not have a documented command-line export
-    option, so export_pdf_via_affinity() below drives it by opening the
-    file and sending a keyboard shortcut for File > Export. The exact
-    shortcut/dialog flow can vary by Affinity version and by how your
-    dialog remembers its last-used settings (format, DPI, etc). Test
-    this step by itself first and adjust EXPORT_KEYSTROKES /
-    export_wait_seconds (in Setup Config) as needed for your installed
-    version before relying on it unattended. Once a file's PDF has been
-    exported successfully one time, the cache logic means Affinity won't
-    need to be touched again for that product until you edit the source
-    file.
+    option, so export_pdf_via_affinity() below drives it through the UI.
+    The keyboard shortcut and dialog flow (Ctrl+Alt+Shift+W -> Affinity's
+    Export panel -> a native Save As dialog -> an optional overwrite
+    confirmation) were confirmed from a screen recording of the actual
+    flow on this installation. The PDF format preset is selected
+    explicitly every time (see PDF_CATEGORY_NAME / PDF_PRESET_NAME) -
+    an earlier version of this code assumed the panel would keep
+    remembering PDF as the last-used format, but that turned out to be
+    wrong: it can drift to a completely different format (confirmed:
+    PNG) after any unrelated export in Affinity, not just this app's
+    own. Test end-to-end after any Affinity update, since a version
+    change could shift a shortcut, dialog layout, or the exact preset
+    name again. Once a file's PDF has been exported successfully one
+    time, the cache logic means Affinity won't need to be touched again
+    for that product until you edit the source file.
 
     If Affinity is already open, export_pdf_via_affinity() reuses that
     instance via a File > Open keystroke (OPEN_FILE_KEYSTROKES) instead
     of launching a second one - this avoids paying the cold-start wait
-    on every scan, only the first one. This also needs verification on
-    your installed version, and matters most if multiple documents can
+    on every scan, only the first one. Unlike the export flow above,
+    this reuse-instance path has NOT been confirmed against a recording
+    yet, so it's the first thing to check if reusing an already-open
+    Affinity misbehaves. It also matters most if multiple documents can
     end up open in tabs at once: the export keystrokes that follow act
     on whichever document currently has focus, so confirm the newly
     opened file is the active tab/window before export happens
@@ -50,6 +57,9 @@ IMPORTANT - the pieces that need hands-on testing:
 
 Requires:
     pip install pywin32 pywinauto
+    (win32print, from pywin32, is used to temporarily set the configured
+    printer as the Windows default before calling Acrobat's /t switch -
+    see print_pdf_via_acrobat for why.)
 """
 
 import os
@@ -58,22 +68,52 @@ import time
 import tkinter as tk
 from tkinter import messagebox
 
-import win32com.client
-
 from setup_config import load_config
 from generate_barcode import parse_barcode_payload
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Keystrokes sent to Affinity Designer to reach File > Export and confirm
-# a PDF export using the dialog's last-used settings. VERIFY THIS on your
-# installed version before relying on it - see module docstring above.
-EXPORT_KEYSTROKES = ["^+e"]  # Ctrl+Shift+E - adjust if your version differs
+# Keystrokes sent to Affinity Designer to reach File > Export > Export...
+# Confirmed from a screen recording of the actual dialog flow on your
+# installed version: this is Ctrl+Alt+Shift+W, NOT Ctrl+Shift+E.
+EXPORT_KEYSTROKES = ["^%+w"]  # Ctrl+Alt+Shift+W
 
 # Keystrokes sent to an already-open Affinity instance to reach File > Open
 # so a new source file can be loaded into it, instead of launching a whole
-# second instance of the app. VERIFY THIS on your installed version too.
+# second instance of the app. NOT YET VERIFIED against a recording like
+# EXPORT_KEYSTROKES was - if reusing an open instance misbehaves, this is
+# the first thing to check.
 OPEN_FILE_KEYSTROKES = ["^o"]  # Ctrl+O - adjust if your version differs
+
+# How long (seconds) to wait after the export shortcut for Affinity's
+# Export panel to fully render (format list, live preview, file size
+# estimate) before interacting with it. This is a bigger, more complex
+# panel than a plain confirm dialog, so it gets its own wait separate
+# from export_wait_seconds (which covers the file opening beforehand).
+EXPORT_DIALOG_WAIT_SECONDS = 2.0
+
+# How long (seconds) to wait, after sending the export keystrokes, for the
+# PDF to actually appear on disk before giving up and reporting a clear
+# error. This is what turns a silent failure (the automation misfiring)
+# into a message you can actually see and act on.
+EXPORT_VERIFY_TIMEOUT_SECONDS = 10
+
+# How long (seconds) to give each Acrobat /t invocation to spool a print
+# job before this app closes that Acrobat instance itself. Acrobat
+# doesn't reliably exit on its own after /t hands a job to the printer -
+# confirmed by a successful physical print happening even when the old,
+# stricter 30-second wait-for-exit logic reported a "failure." This is
+# just a reasonable spooling window, not a strict success/failure check.
+PRINT_SPOOL_WAIT_SECONDS = 8
+
+# Names of the format entries in Affinity's Export panel, as they appear
+# in the format list. Confirmed against a screen recording. The panel
+# can remember a completely different format (PNG has been observed) if
+# ANY export was done more recently for any other purpose - so these are
+# selected explicitly every export rather than trusting what's already
+# highlighted.
+PDF_CATEGORY_NAME = "PDF"
+PDF_PRESET_NAME = "PDF (for export)"
 
 
 def is_affinity_running(affinity_exe: str) -> bool:
@@ -117,9 +157,24 @@ def pdf_cache_is_current(source_path: str, pdf_path: str) -> bool:
 def export_pdf_via_affinity(source_path: str, pdf_path: str, config: dict) -> None:
     """
     Gets the source file open in Affinity Designer and exports a PDF to
-    pdf_path, then drives the export dialog. See the module docstring -
-    both this step and the reuse-existing-instance step below need to be
-    verified against your installed Affinity version.
+    pdf_path. Confirmed from a screen recording of the real dialog flow,
+    the export is actually THREE layered dialogs, not one:
+
+        1. Affinity's own "Export" panel (Ctrl+Alt+Shift+W) - a bespoke
+           format-picker + settings panel, not a plain confirm box. Its
+           remembered format can drift to whatever was used most
+           recently for ANY export in Affinity (confirmed: it drifted to
+           PNG), so this code explicitly clicks the PDF preset every
+           time rather than trusting it's already selected, then clicks
+           the panel's own "Export..." button.
+        2. A native Windows "Save As" file dialog, prefilled with the
+           source file's name and defaulting to whatever folder was used
+           last time (NOT necessarily the source file's folder) - the
+           full destination path gets typed directly into its filename
+           field, which Windows resolves correctly on its own.
+        3. If a file already exists at that destination, a native
+           "already exists - replace it?" confirmation, with "Yes" as
+           the default (focused) button.
 
     If Affinity is already running (e.g. left open from a previous scan
     or opened manually), this reuses that instance via File > Open
@@ -156,55 +211,210 @@ def export_pdf_via_affinity(source_path: str, pdf_path: str, config: dict) -> No
         time.sleep(config.get("export_wait_seconds", 6))
 
     app = pywinauto.Application(backend="uia").connect(path=affinity_exe)
-    window = app.top_window()
-    window.set_focus()
+    main_window = app.top_window()
+    main_window.set_focus()
 
+    # --- Dialog 1: Affinity's own Export panel ----------------------
     for keys in EXPORT_KEYSTROKES:
-        window.type_keys(keys, pause=0.2)
-        time.sleep(1.5)
+        main_window.type_keys(keys, pause=0.2)
+    time.sleep(EXPORT_DIALOG_WAIT_SECONDS)
 
-    # At this point Affinity's export dialog should be open with PDF as
-    # the format (set that as the default once, manually, so it's
-    # remembered). Confirm the export:
-    window.type_keys("{ENTER}", pause=0.2)
+    # This panel remembers whatever format was used most recently for
+    # ANY export in Affinity - not just this app's own exports - so it
+    # can drift to something completely unrelated (confirmed: it drifted
+    # to PNG after unrelated manual testing). Never trust it's still set
+    # to PDF; select the PDF preset explicitly every time instead.
+    try:
+        export_panel = app.window(title="Export")
+        export_panel.wait("visible", timeout=10)
+
+        try:
+            pdf_preset_item = export_panel.child_window(title=PDF_PRESET_NAME, control_type="ListItem")
+            pdf_preset_item.click_input()
+        except Exception:
+            # The PDF sub-presets are likely collapsed under the
+            # top-level "PDF" category (as opposed to whatever category
+            # - e.g. PNG - was last expanded) - click that first to
+            # reveal them, then retry selecting the specific preset.
+            pdf_category_item = export_panel.child_window(title=PDF_CATEGORY_NAME, control_type="ListItem")
+            pdf_category_item.click_input()
+            time.sleep(0.5)
+            pdf_preset_item = export_panel.child_window(title=PDF_PRESET_NAME, control_type="ListItem")
+            pdf_preset_item.click_input()
+
+        # Selecting a preset makes the whole right-hand settings panel
+        # re-render (file size estimate, DPI options, etc all change) -
+        # give that a moment to finish. Critically, the export_button
+        # reference is looked up FRESH after this wait rather than
+        # captured earlier - grabbing it before the re-render finishes
+        # produces a stale/disconnected element reference, which showed
+        # up as a COM "event was unable to invoke any of the
+        # subscribers" error when clicked.
+        time.sleep(1.0)
+
+        export_button = None
+        last_click_error = None
+        for attempt in range(3):
+            try:
+                export_panel = app.window(title="Export")  # re-fetch, not reused
+                export_button = export_panel.child_window(title="Export...", control_type="Button")
+                export_button.wait("enabled", timeout=5)
+                export_button.click_input()
+                last_click_error = None
+                break
+            except Exception as click_exc:
+                last_click_error = click_exc
+                time.sleep(0.75)
+        if last_click_error is not None:
+            raise last_click_error
+    except Exception:
+        # Fallback: send Enter to whatever currently has focus at the OS
+        # level, rather than a specific window reference - main_window
+        # was captured before the Export panel opened, so it may no
+        # longer be the right target to send keys to directly.
+        pywinauto.keyboard.send_keys("{ENTER}", pause=0.2)
     time.sleep(1.0)
 
-    # The Save-As style dialog that follows needs the destination path
-    # typed in and confirmed.
-    window.type_keys(pdf_path, with_spaces=True, pause=0.02)
-    window.type_keys("{ENTER}", pause=0.2)
+    # --- Dialog 2: native Windows "Save As" file dialog --------------
+    # This is a real Windows common dialog, so its filename field is
+    # reliably focused by default the moment it opens - no need to
+    # click into it first. Using the global keyboard (not
+    # main_window.type_keys) is important here: calling type_keys on a
+    # specific window wrapper forces THAT window back into focus first,
+    # which would fight the separate Save As dialog for focus and send
+    # keystrokes to the wrong place. Select-all before typing so the
+    # pre-filled default name (the source file's own name) gets replaced
+    # outright rather than partially overwritten.
+    pywinauto.keyboard.send_keys("^a", pause=0.2)
+    pywinauto.keyboard.send_keys(pdf_path, with_spaces=True, pause=0.02)
+    pywinauto.keyboard.send_keys("{ENTER}", pause=0.2)
     time.sleep(2.0)
 
-    # Overwrite confirmation, if the file already exists.
-    window.type_keys("{ENTER}", pause=0.2)
+    # --- Dialog 3: "already exists - replace it?" (only if applicable) ---
+    # Only appears if pdf_path already existed. "Yes" is the default
+    # (focused) button, so Enter accepts it; if the dialog never opened,
+    # this Enter is harmless (it just reaches whatever currently has
+    # focus, typically the Affinity canvas).
+    pywinauto.keyboard.send_keys("{ENTER}", pause=0.2)
+
+    # --- Verify the export actually happened -----------------------
+    # Everything above is keystrokes/clicks fired at whatever dialog is
+    # currently in front - if any step doesn't match what's actually on
+    # screen (a version difference, unexpected timing), this won't raise
+    # an error on its own. Without this check, print_listener.py would
+    # go on to try printing a PDF that was never created. So: poll for
+    # the file to actually show up, and fail loudly and specifically if
+    # it doesn't.
+    poll_interval = 0.5
+    max_wait = EXPORT_VERIFY_TIMEOUT_SECONDS
+    waited = 0.0
+    while waited < max_wait:
+        if os.path.exists(pdf_path):
+            return
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+    raise RuntimeError(
+        f"Affinity did not produce a PDF at:\n{pdf_path}\n\n"
+        "The export panel or Save As dialog may not have appeared the "
+        "way this app expected. Try it manually: open this file in "
+        "Affinity, press Ctrl+Alt+Shift+W, and watch exactly what "
+        "appears and in what order - then EXPORT_KEYSTROKES / the "
+        "steps in export_pdf_via_affinity() near the top of "
+        "print_listener.py may need further adjustment to match."
+    )
 
 
 def print_pdf_via_acrobat(pdf_path: str, copies: int, config: dict) -> None:
     """
-    Prints pdf_path silently through Adobe Acrobat's COM interface,
-    using the printer name from config.json and the requested copy count.
-    No print dialog is shown.
+    Prints pdf_path silently using Acrobat's own command-line silent-print
+    switch (/t), once per requested copy. No print dialog is shown.
+
+    NOTE: this used to drive Acrobat's internal JavaScript print API
+    (getPrintParams / printWithParams) through COM automation. Modern
+    Acrobat DC blocks external callers from invoking privileged JS
+    methods like those, for security reasons - that's what produced the
+    "(-2147467263, 'Not implemented', None, None)" error, and it has
+    nothing to do with which printer is configured. The /t switch is
+    Adobe's own documented mechanism for unattended silent printing and
+    isn't subject to that restriction.
+
+    /t's documented syntax is either "/t <path>" (2 args, prints to
+    whatever the Windows default printer is) or the full 4-argument form
+    "/t <path> <printername> <drivername> <portname>" - there's no
+    supported 3-argument form with just a printer name and no
+    driver/port. Passing exactly 3 args (as an earlier version of this
+    function did) landed in that unsupported middle ground and could
+    make Acrobat misparse its own arguments, producing a confusing
+    "this file cannot be found" error despite the file being right
+    there. To sidestep that entirely: the configured printer is set as
+    the temporary Windows default (restored afterward) and Acrobat is
+    always called with just the 2-argument form.
+
+    /t prints exactly one copy per invocation with no dialog, so
+    multiple copies means launching Acrobat that many times in a row.
+    Acrobat is not required to fully close itself after each one - this
+    function gives it a reasonable window to spool the job, then closes
+    that instance itself either way (see PRINT_SPOOL_WAIT_SECONDS).
     """
-    app = win32com.client.Dispatch("AcroExch.App")
-    avdoc = win32com.client.Dispatch("AcroExch.AVDoc")
+    import win32print
 
-    if not avdoc.Open(pdf_path, ""):
-        raise RuntimeError(f"Acrobat could not open: {pdf_path}")
+    acrobat_exe = config["acrobat_exe_path"]
+    printer_name = (config.get("printer_name") or "").strip()
 
-    pddoc = avdoc.GetPDDoc()
-    jsobj = pddoc.GetJSObject()
+    original_default_printer = None
+    if printer_name:
+        try:
+            original_default_printer = win32print.GetDefaultPrinter()
+        except Exception:
+            original_default_printer = None
+        if printer_name != original_default_printer:
+            try:
+                win32print.SetDefaultPrinter(printer_name)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Couldn't set '{printer_name}' as the Windows default "
+                    f"printer:\n{exc}\n\n"
+                    "Check Setup Config - the printer name has to match "
+                    "exactly what Windows calls it (Settings > Printers & "
+                    "Scanners)."
+                ) from exc
 
-    print_params = jsobj.getPrintParams()
-    print_params.copies = int(copies)
-    print_params.interactive = print_params.constants.interactionLevel.silent
-    if config.get("printer_name"):
-        print_params.printerName = config["printer_name"]
-
-    jsobj.printWithParams(print_params)
-
-    time.sleep(1.0)  # give the print job a moment to spool before closing
-    avdoc.Close(True)
-    app.Exit()
+    try:
+        for copy_number in range(1, int(copies) + 1):
+            args = [acrobat_exe, "/t", pdf_path]
+            proc = subprocess.Popen(args)
+            try:
+                # Acrobat doesn't reliably self-close after handing a job
+                # off to the printer via /t - it can just sit open
+                # afterward, which is normal, not a failure (confirmed:
+                # a physical label printed successfully even when this
+                # wait "timed out" under the old logic). So: give it a
+                # reasonable window to actually spool the job, and don't
+                # treat "still running" past that point as an error.
+                proc.wait(timeout=PRINT_SPOOL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass  # expected/normal - see comment above
+            finally:
+                # Close this instance ourselves so scanning all day
+                # doesn't pile up dozens of leftover Acrobat windows.
+                if proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+            # A short pause between copies avoids overlapping launches, which
+            # can otherwise confuse the printer's spool order.
+            time.sleep(1.5)
+    finally:
+        # Always restore whatever the default printer was before, even
+        # if printing failed partway through - this app shouldn't leave
+        # a machine-wide setting changed behind it.
+        if original_default_printer and printer_name != original_default_printer:
+            try:
+                win32print.SetDefaultPrinter(original_default_printer)
+            except Exception:
+                pass  # best-effort restore - not worth failing the print over
 
 
 class ListenerWindow(tk.Tk):
@@ -330,13 +540,14 @@ class ListenerWindow(tk.Tk):
             return
 
         self.status_var.set(f"Printing {quantity} copies...")
+        self.detail_var.set(f"File: {self.pending_pdf_path}")
         self.update_idletasks()
 
         try:
             print_pdf_via_acrobat(self.pending_pdf_path, quantity, self.config_data)
         except Exception as exc:
             self.status_var.set("Print failed. See detail below.")
-            self.detail_var.set(str(exc))
+            self.detail_var.set(f"{exc}\n\nFile: {self.pending_pdf_path}")
             self.reset_to_wait_artwork()
             return
 
